@@ -1,2 +1,3 @@
-# aws-automate-python
-Autoamting AWS Cloud Management with python
+# Automating AWS with python
+
+Repository for the *AWS Cloud Management with python*
