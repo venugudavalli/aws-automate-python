@@ -4,22 +4,29 @@
 
 from pathlib import Path
 import mimetypes
+from hashlib import md5
 from botocore.exceptions import ClientError
 import util
 
 
 class BucketManager:
     """Manage an s3 bucket."""
+    CHUNK_SIZE = 8388608
 
     def __init__(self, session):
         """Create a Bucket Manager object."""
         self.session = session
         self.s3 = session.resource('s3')
+        self.transfer_config = boto.s3.transfer.TransferConfig(
+            multipart_chunksize = CHUNK_SIZE,
+            multipart_threshold = CHUNK_SIZE
+            )
+        self.manifest = {}
 
     def get_region_name(self, bucket):
         """Get the bucket's region name."""
-        bucket_location = self.s3.meta.client.get_bucket_location(
-            Bucket=bucket.name)
+        client = self.s3.meta.client
+        bucket_location = client.get_bucket_location(Bucket=bucket.name)
 
         return bucket_location["LocationConstraint"] or 'us-east-1'
 
@@ -84,6 +91,29 @@ class BucketManager:
                 }
             })
 
+    def load_maifest(self, bucket):
+        """Load manifest for cahcing purposes."""
+        paginator = self.s3.meta.client.get_paginator('list_objects_v2')
+        for page in paginator.paginate(Bucket=bucket.name'):
+            for obj in page.get('Contents',[]):
+                self.manifest[obj['Key']] = obj['ETag']
+
+    @staticmethod
+    def hash_data(data):
+        """Generate md5 hash for data."""
+        hash = md5()
+        hash.update(path)
+        return hash
+
+    def gen_etag(self, filename):
+        """Get ETag for file."""
+        hash = None
+        with open(file, 'rb') as f:
+            data = f.read()
+            hash = self.hash_data(data)
+
+            return F'"{hash.hexdigest()}"'
+
     @staticmethod
     def upload_file(bucket, path, key):
         """Upload an object to s3 Bucket."""
@@ -93,11 +123,14 @@ class BucketManager:
             key,
             ExtraArgs={
                 'ContentType': content_type
-                })
+                },
+                Config=self.transfer_config
+                )
 
     def sync(self, pathname, bucket_name):
         """Sync local website folder with s3 bucket."""
         bucket = self.s3.Bucket(bucket_name)
+        self.load_maifest(bucket)
         root = Path(pathname).expanduser().resolve()
 
         def handle_directory(target):
